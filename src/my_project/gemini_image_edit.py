@@ -30,7 +30,7 @@ from my_project.gemini_config import build_gemini_edit_config
 
 # Human-friendly instructions describing the edit you want Gemini to perform.
 # Provide the filename of a markdown prompt located under ``data/prompts``.
-PROMPT_FILE_NAME: str = "update-beach-image.md"
+PROMPT_FILE_NAME: str = "swap-dress.md"
 
 # Reference imagery (dress details etc.), relative to REFERENCE_IMAGE_DIR.
 REFERENCE_IMAGE_NAMES: List[str] = [
@@ -174,7 +174,7 @@ def build_user_content(
     if not stripped_prompt:
         raise ValueError("The prompt could not be empty. Check the markdown file content.")
 
-    parts: List[genai_types.Part] = [genai_types.Part.from_text(stripped_prompt)]
+    parts: List[genai_types.Part] = [genai_types.Part(text=stripped_prompt)]
 
     ordered_paths = [*reference_paths, target_path]
     for path in ordered_paths:
@@ -185,7 +185,12 @@ def build_user_content(
             )
 
         parts.append(
-            genai_types.Part.from_bytes(data=path.read_bytes(), mime_type=mime_type)
+            genai_types.Part(
+                inline_data=genai_types.Blob(
+                    mime_type=mime_type,
+                    data=path.read_bytes(),
+                )
+            )
         )
 
     return genai_types.Content(role="user", parts=parts)
@@ -209,7 +214,7 @@ def request_image_edit(
         contents.append(
             genai_types.Content(
                 role="system",
-                parts=[genai_types.Part.from_text(stripped_system)],
+                parts=[genai_types.Part(text=stripped_system)],
             )
         )
     contents.append(user_content)
