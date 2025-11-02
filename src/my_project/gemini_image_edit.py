@@ -51,7 +51,7 @@ SYSTEM_PROMPT: str = (
 )
 
 # Gemini model to invoke. Adjust this if Google changes the model identifier.
-MODEL_NAME: str = "models/gemini-2.0-nano-banana"
+MODEL_NAME: str = "models/gemini-2.5-flash-image"
 
 
 # ---------------------------------------------------------------------------
