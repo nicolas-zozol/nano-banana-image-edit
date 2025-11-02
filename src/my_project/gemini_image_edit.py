@@ -32,16 +32,16 @@ from my_project.gemini_config import build_gemini_edit_config
 # Provide the filename of a markdown prompt located under ``data/prompts``.
 PROMPT_FILE_NAME: str = "update-beach-image.md"
 
-# Reference imagery (dress details etc.), relative to RAW_IMAGE_DIR.
+# Reference imagery (dress details etc.), relative to REFERENCE_IMAGE_DIR.
 REFERENCE_IMAGE_NAMES: List[str] = [
-    # "robe-orange.jpeg",
+    "robe-orange.jpeg"
 ]
 
-# Target image (the photo to edit), relative to RAW_IMAGE_DIR.
-TARGET_IMAGE_NAME: str = ""
+# Target image (the photo to edit), relative to TARGET_IMAGE_DIR.
+TARGET_IMAGE_NAME: str = "asian-girl-supermarket.jpg"
 
 # Output filename base (timestamp appended automatically).
-OUTPUT_BASE_NAME: str = "gemini-edit"
+OUTPUT_BASE_NAME: str = "asian-edit"
 
 # System instruction passed to Gemini.
 SYSTEM_PROMPT: str = (
@@ -59,7 +59,8 @@ MODEL_NAME: str = "models/gemini-2.0-nano-banana"
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 PROMPT_DIR: Path = PROJECT_ROOT / "data" / "prompts"
-RAW_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "raw"
+REFERENCE_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "raw"
+TARGET_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "model"
 PROCESSED_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "processed"
 
 
@@ -76,45 +77,54 @@ def load_api_key() -> str:
 
 
 def resolve_reference_and_target_paths(
-    directory: Path,
+    reference_dir: Path,
+    target_dir: Path,
     reference_names: Iterable[str],
     target_name: str,
 ) -> Tuple[List[Path], Path]:
     """Locate reference images and the target image on disk."""
 
-    if not directory.exists():
-        raise FileNotFoundError(f"Raw images directory '{directory}' does not exist.")
+    if not reference_dir.exists():
+        raise FileNotFoundError(f"Reference images directory '{reference_dir}' does not exist.")
+    if not target_dir.exists():
+        raise FileNotFoundError(f"Target images directory '{target_dir}' does not exist.")
 
     if not target_name:
         raise ValueError(
             "TARGET_IMAGE_NAME is empty. Set it to the filename of the photo you want to edit."
         )
 
-    target_path = directory / target_name
+    target_path = target_dir / target_name
     if not target_path.exists():
-        available = ", ".join(path.name for path in directory.iterdir() if path.is_file()) or "<none>"
+        available = ", ".join(path.name for path in target_dir.iterdir() if path.is_file()) or "<none>"
         raise FileNotFoundError(
-            f"Target image '{target_name}' was not found in '{directory}'. Available files: {available}"
+            f"Target image '{target_name}' was not found in '{target_dir}'. Available files: {available}"
         )
 
     references: List[Path] = []
     if reference_names:
         for name in reference_names:
-            candidate = directory / name
+            candidate = reference_dir / name
             if not candidate.exists():
                 raise FileNotFoundError(
-                    f"Reference image '{name}' was not found in '{directory}'."
+                    f"Reference image '{name}' was not found in '{reference_dir}'."
                 )
-            if candidate == target_path:
-                raise ValueError("A reference image duplicates the target image. Remove it from references.")
+            if candidate.resolve() == target_path.resolve():
+                raise ValueError(
+                    "A reference image duplicates the target image. Remove it from REFERENCE_IMAGE_NAMES."
+                )
             references.append(candidate)
     else:
-        references = [path for path in sorted(directory.iterdir()) if path.is_file() and path != target_path]
+        references = [
+            path
+            for path in sorted(reference_dir.iterdir())
+            if path.is_file() and path.resolve() != target_path.resolve()
+        ]
 
     if not references:
         raise ValueError(
             "No reference images were resolved. Add at least one file to REFERENCE_IMAGE_NAMES or keep other "
-            "files in the raw directory."
+            "files in the reference directory."
         )
 
     if len(references) > 2:
@@ -272,9 +282,10 @@ def run_image_edit() -> List[Path]:
     print(f"  - {(PROMPT_DIR / PROMPT_FILE_NAME).relative_to(PROJECT_ROOT)}")
 
     reference_paths, target_path = resolve_reference_and_target_paths(
-        RAW_IMAGE_DIR,
-        REFERENCE_IMAGE_NAMES,
-        TARGET_IMAGE_NAME,
+        reference_dir=REFERENCE_IMAGE_DIR,
+        target_dir=TARGET_IMAGE_DIR,
+        reference_names=REFERENCE_IMAGE_NAMES,
+        target_name=TARGET_IMAGE_NAME,
     )
     print("📚 Reference images:")
     for path in reference_paths:

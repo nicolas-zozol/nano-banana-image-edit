@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from yourpkg.gemini_edit_config import buildGeminiEditConfig
+from my_project.gemini_config import build_gemini_edit_config
 
 
 def test_randomized_sampling_within_expected_bounds() -> None:
-    config = buildGeminiEditConfig(
-        referenceImages=["ref1.png"],
-        targetImage="target.png",
+    config = build_gemini_edit_config(
+        reference_images=["ref1.png"],
+        target_image="target.png",
     )
 
     temperature = config["sampling"]["temperature"]
@@ -19,11 +19,11 @@ def test_randomized_sampling_within_expected_bounds() -> None:
 
 
 def test_sampling_overrides_are_respected() -> None:
-    config = buildGeminiEditConfig(
-        referenceImages=["ref1.png"],
-        targetImage="target.png",
+    config = build_gemini_edit_config(
+        reference_images=["ref1.png"],
+        target_image="target.png",
         temperature=0.25,
-        topP=0.8,
+        top_p=0.8,
     )
 
     assert config["sampling"]["temperature"] == 0.25
@@ -31,9 +31,9 @@ def test_sampling_overrides_are_respected() -> None:
 
 
 def test_payload_order_places_target_last() -> None:
-    config = buildGeminiEditConfig(
-        referenceImages=["ref1.png", "ref2.png"],
-        targetImage="target.png",
+    config = build_gemini_edit_config(
+        reference_images=["ref1.png", "ref2.png"],
+        target_image="target.png",
     )
 
     assert config["payloadOrderHint"]["images"] == [
