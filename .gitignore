@@ -9,7 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+# API keys and more
+.env
 
 #IDE
 .iml
 .idea/
+
+ignored_files/
