@@ -164,17 +164,25 @@ def load_prompt(prompt_file_name: str) -> str:
 
 
 def build_user_content(
-    prompt: str,
+    *,
+    system_text: str,
+    prompt_text: str,
     reference_paths: Iterable[Path],
     target_path: Path,
 ) -> genai_types.Content:
-    """Assemble the message payload Gemini expects."""
+    """Assemble a single ``user`` content block with system and prompt text."""
 
-    stripped_prompt = prompt.strip()
+    stripped_prompt = prompt_text.strip()
     if not stripped_prompt:
         raise ValueError("The prompt could not be empty. Check the markdown file content.")
 
-    parts: List[genai_types.Part] = [genai_types.Part(text=stripped_prompt)]
+    parts: List[genai_types.Part] = []
+
+    stripped_system = system_text.strip()
+    if stripped_system:
+        parts.append(genai_types.Part(text=f"[SYSTEM]\n{stripped_system}"))
+
+    parts.append(genai_types.Part(text=stripped_prompt))
 
     ordered_paths = [*reference_paths, target_path]
     for path in ordered_paths:
@@ -198,7 +206,6 @@ def build_user_content(
 
 def request_image_edit(
     *,
-    system_text: str,
     user_content: genai_types.Content,
     temperature: float,
     top_p: float,
@@ -208,20 +215,9 @@ def request_image_edit(
     api_key = load_api_key()
     client = genai.Client(api_key=api_key)
 
-    contents: List[genai_types.Content] = []
-    stripped_system = system_text.strip()
-    if stripped_system:
-        contents.append(
-            genai_types.Content(
-                role="system",
-                parts=[genai_types.Part(text=stripped_system)],
-            )
-        )
-    contents.append(user_content)
-
     response = client.models.generate_content(
         model=MODEL_NAME,
-        contents=contents,
+        contents=[user_content],
         config=genai_types.GenerateContentConfig(
             response_modalities=["IMAGE"],
             candidate_count=1,
@@ -313,9 +309,13 @@ def run_image_edit() -> List[Path]:
     print("💾 Planned output filename:")
     print(f"  - {config['outputFile']}")
 
-    user_content = build_user_content(prompt_text, reference_paths, target_path)
-    response = request_image_edit(
+    user_content = build_user_content(
         system_text=config["system"],
+        prompt_text=prompt_text,
+        reference_paths=reference_paths,
+        target_path=target_path,
+    )
+    response = request_image_edit(
         user_content=user_content,
         temperature=sampling["temperature"],
         top_p=sampling["topP"],
