@@ -17,13 +17,16 @@ import mimetypes
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types as genai_types
 
-from my_project.gemini_config import build_gemini_edit_config
+from my_project.edit_configuration import (
+    EditConfigurationBundle,
+    prepare_edit_configuration,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration section – tweak these values before each run.
@@ -75,93 +78,6 @@ def load_api_key() -> str:
             "GEMINI_API_KEY was not found. Set it in your .env file before running."
         )
     return api_key
-
-
-def resolve_reference_and_target_paths(
-    reference_dir: Path,
-    target_dir: Path,
-    reference_names: Iterable[str],
-    target_name: str,
-) -> Tuple[List[Path], Path]:
-    """Locate reference images and the target image on disk."""
-
-    if not reference_dir.exists():
-        raise FileNotFoundError(f"Reference images directory '{reference_dir}' does not exist.")
-    if not target_dir.exists():
-        raise FileNotFoundError(f"Target images directory '{target_dir}' does not exist.")
-
-    if not target_name:
-        raise ValueError(
-            "TARGET_IMAGE_NAME is empty. Set it to the filename of the photo you want to edit."
-        )
-
-    target_path = target_dir / target_name
-    if not target_path.exists():
-        available = ", ".join(path.name for path in target_dir.iterdir() if path.is_file()) or "<none>"
-        raise FileNotFoundError(
-            f"Target image '{target_name}' was not found in '{target_dir}'. Available files: {available}"
-        )
-
-    references: List[Path] = []
-    if reference_names:
-        for name in reference_names:
-            candidate = reference_dir / name
-            if not candidate.exists():
-                raise FileNotFoundError(
-                    f"Reference image '{name}' was not found in '{reference_dir}'."
-                )
-            if candidate.resolve() == target_path.resolve():
-                raise ValueError(
-                    "A reference image duplicates the target image. Remove it from REFERENCE_IMAGE_NAMES."
-                )
-            references.append(candidate)
-    else:
-        references = [
-            path
-            for path in sorted(reference_dir.iterdir())
-            if path.is_file() and path.resolve() != target_path.resolve()
-        ]
-
-    if not references:
-        raise ValueError(
-            "No reference images were resolved. Add at least one file to REFERENCE_IMAGE_NAMES or keep other "
-            "files in the reference directory."
-        )
-
-    if len(references) > 2:
-        raise ValueError(
-            "Nano Banana works best with at most two reference images. Reduce REFERENCE_IMAGE_NAMES to <=2."
-        )
-
-    return references, target_path
-
-
-def load_prompt(prompt_file_name: str) -> str:
-    """Read the selected prompt markdown file."""
-
-    if not prompt_file_name:
-        raise ValueError(
-            "PROMPT_FILE_NAME is empty. Select a markdown file from data/prompts."
-        )
-
-    if not PROMPT_DIR.exists():
-        raise FileNotFoundError(
-            f"Prompt directory '{PROMPT_DIR}' does not exist. Create it or update PROMPT_DIR."
-        )
-
-    prompt_path = PROMPT_DIR / prompt_file_name
-    if not prompt_path.exists():
-        available = ", ".join(path.name for path in PROMPT_DIR.glob("*.md")) or "<none>"
-        raise FileNotFoundError(
-            f"Prompt file '{prompt_file_name}' was not found in '{PROMPT_DIR}'. "
-            f"Available prompts: {available}"
-        )
-
-    text = prompt_path.read_text(encoding="utf-8").strip()
-    if not text:
-        raise ValueError(f"Prompt file '{prompt_file_name}' is empty. Populate it before running.")
-
-    return text
 
 
 def build_user_content(
@@ -279,31 +195,31 @@ def save_images(
 def run_image_edit() -> List[Path]:
     """Top-level helper that executes the end-to-end edit workflow."""
 
-    prompt_text = load_prompt(PROMPT_FILE_NAME)
     print("📝 Prompt source:")
     print(f"  - {(PROMPT_DIR / PROMPT_FILE_NAME).relative_to(PROJECT_ROOT)}")
 
-    reference_paths, target_path = resolve_reference_and_target_paths(
+    bundle: EditConfigurationBundle = prepare_edit_configuration(
+        prompt_dir=PROMPT_DIR,
+        prompt_file_name=PROMPT_FILE_NAME,
         reference_dir=REFERENCE_IMAGE_DIR,
-        target_dir=TARGET_IMAGE_DIR,
         reference_names=REFERENCE_IMAGE_NAMES,
+        target_dir=TARGET_IMAGE_DIR,
         target_name=TARGET_IMAGE_NAME,
-
+        output_base_name=OUTPUT_BASE_NAME,
+        system_prompt=SYSTEM_PROMPT,
+        temperature=0.28,
     )
+
+    prompt_text = bundle.prompt_text
+    reference_paths = bundle.reference_paths
+    target_path = bundle.target_path
+    config = bundle.config
+
     print("📚 Reference images:")
     for path in reference_paths:
         print(f"  - {path.relative_to(PROJECT_ROOT)}")
     print("🎯 Target image:")
     print(f"  - {target_path.relative_to(PROJECT_ROOT)}")
-
-    config = build_gemini_edit_config(
-        reference_images=[str(path) for path in reference_paths],
-        target_image=str(target_path),
-        output_base_name=OUTPUT_BASE_NAME,
-        system_prompt=SYSTEM_PROMPT,
-        prompt=prompt_text,
-        temperature=0.28
-    )
 
     sampling = config["sampling"]
     print("🎛️ Sampling params:")
