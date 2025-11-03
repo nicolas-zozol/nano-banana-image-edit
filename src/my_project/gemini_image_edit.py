@@ -38,10 +38,11 @@ REFERENCE_IMAGE_NAMES: List[str] = [
 ]
 
 # Target image (the photo to edit), relative to TARGET_IMAGE_DIR.
-TARGET_IMAGE_NAME: str = "asian-girl-supermarket.jpg"
+#  "asian-girl-supermarket.jpg"
+TARGET_IMAGE_NAME: str ="street-graph.png"
 
 # Output filename base (timestamp appended automatically).
-OUTPUT_BASE_NAME: str = "asian-edit"
+OUTPUT_BASE_NAME: str = "street-graph"
 
 # System instruction passed to Gemini.
 SYSTEM_PROMPT: str = (
@@ -287,6 +288,7 @@ def run_image_edit() -> List[Path]:
         target_dir=TARGET_IMAGE_DIR,
         reference_names=REFERENCE_IMAGE_NAMES,
         target_name=TARGET_IMAGE_NAME,
+
     )
     print("📚 Reference images:")
     for path in reference_paths:
@@ -300,6 +302,7 @@ def run_image_edit() -> List[Path]:
         output_base_name=OUTPUT_BASE_NAME,
         system_prompt=SYSTEM_PROMPT,
         prompt=prompt_text,
+        temperature=0.28
     )
 
     sampling = config["sampling"]
