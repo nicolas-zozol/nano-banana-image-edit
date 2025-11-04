@@ -23,10 +23,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types as genai_types
 
-from my_project.edit_configuration import (
-    EditConfigurationBundle,
-    prepare_edit_configuration,
-)
+from my_project.edit_configuration import prepare_edit_configuration
+from my_project.gemini_config import build_gemini_edit_config
 
 # ---------------------------------------------------------------------------
 # Configuration section – tweak these values before each run.
@@ -42,21 +40,23 @@ REFERENCE_IMAGE_NAMES: List[str] = [
 
 # Target image (the photo to edit), relative to TARGET_IMAGE_DIR.
 #  "asian-girl-supermarket.jpg"
-TARGET_IMAGE_NAME: str ="street-graph.png"
+TARGET_IMAGE_NAME: str ="blonde-woman-posing.jpeg"
 
 # Output filename base (timestamp appended automatically).
-OUTPUT_BASE_NAME: str = "street-graph"
+OUTPUT_BASE_NAME: str = "blonde"
 
 # System instruction passed to Gemini.
 SYSTEM_PROMPT: str = (
-    "Perform a surgical wardrobe swap. Preserve the target woman's identity, pose, framing, "
-    "hairstyle, skin tone, accessories, and background. Keep lighting direction and color grade. "
-    "No cropping, no recomposition, no text or logos. Only modify clothing as requested."
+    "Perform a targeted wardrobe overwrite on the target canvas. You may fully replace clothing inside the editable region. Preserve the target woman’s identity, facial geometry, hairstyle, skin tone, hands, accessories, pose, framing, and background. Keep scene lighting and color grade. No logos or text. Do not crop or recompose"
 )
 
 # Gemini model to invoke. Adjust this if Google changes the model identifier.
 MODEL_NAME: str = "models/gemini-2.5-flash-image"
 
+
+VARIATIONS: int = 3
+BASE_TEMPERATURE: float = 0.23
+TEMPERATURE_SPREAD: float = 0.05
 
 # ---------------------------------------------------------------------------
 # Derived paths.
@@ -65,7 +65,8 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 PROMPT_DIR: Path = PROJECT_ROOT / "data" / "prompts"
 REFERENCE_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "raw"
 TARGET_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "model"
-PROCESSED_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "processed"
+PROCESSED_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "processed"  # reserved for manual curation
+SAMPLE_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "samples"
 
 
 def load_api_key() -> str:
@@ -119,6 +120,23 @@ def build_user_content(
         )
 
     return genai_types.Content(role="user", parts=parts)
+
+
+def generate_temperature_schedule(base: float, count: int, spread: float = TEMPERATURE_SPREAD) -> List[float]:
+    """Return a list of temperatures centred around ``base`` within safe bounds."""
+
+    minimum = 0.20
+    maximum = 0.35
+    if count <= 1:
+        return [round(max(min(base, maximum), minimum), 4)]
+
+    lower = max(minimum, base - spread)
+    upper = min(maximum, base + spread)
+    if upper <= lower:
+        return [round(lower, 4)] * count
+
+    step = (upper - lower) / (count - 1)
+    return [round(lower + step * idx, 4) for idx in range(count)]
 
 
 def request_image_edit(
@@ -198,7 +216,7 @@ def run_image_edit() -> List[Path]:
     print("📝 Prompt source:")
     print(f"  - {(PROMPT_DIR / PROMPT_FILE_NAME).relative_to(PROJECT_ROOT)}")
 
-    bundle: EditConfigurationBundle = prepare_edit_configuration(
+    bundle = prepare_edit_configuration(
         prompt_dir=PROMPT_DIR,
         prompt_file_name=PROMPT_FILE_NAME,
         reference_dir=REFERENCE_IMAGE_DIR,
@@ -207,13 +225,13 @@ def run_image_edit() -> List[Path]:
         target_name=TARGET_IMAGE_NAME,
         output_base_name=OUTPUT_BASE_NAME,
         system_prompt=SYSTEM_PROMPT,
-        temperature=0.28,
+        temperature=BASE_TEMPERATURE,
     )
 
     prompt_text = bundle.prompt_text
     reference_paths = bundle.reference_paths
     target_path = bundle.target_path
-    config = bundle.config
+    base_config = bundle.config
 
     print("📚 Reference images:")
     for path in reference_paths:
@@ -221,31 +239,51 @@ def run_image_edit() -> List[Path]:
     print("🎯 Target image:")
     print(f"  - {target_path.relative_to(PROJECT_ROOT)}")
 
-    sampling = config["sampling"]
-    print("🎛️ Sampling params:")
-    print(f"  - temperature={sampling['temperature']}")
-    print(f"  - topP={sampling['topP']}")
-    print("💾 Planned output filename:")
-    print(f"  - {config['outputFile']}")
+    base_top_p = base_config["sampling"]["topP"]
+    temperatures = generate_temperature_schedule(BASE_TEMPERATURE, VARIATIONS)
+    print("🎛️ Temperature schedule:")
+    for idx, temp in enumerate(temperatures, start=1):
+        print(f"  - variation {idx}: temperature={temp}")
 
-    user_content = build_user_content(
-        system_text=config["system"],
-        prompt_text=prompt_text,
-        reference_paths=reference_paths,
-        target_path=target_path,
-    )
-    response = request_image_edit(
-        user_content=user_content,
-        temperature=sampling["temperature"],
-        top_p=sampling["topP"],
-    )
-    output_paths = save_images(response, PROCESSED_IMAGE_DIR, config["outputFile"])
+    saved_paths: List[Path] = []
 
-    print("✅ Gemini returned the following edits:")
-    for path in output_paths:
-        print(f"  - {path.relative_to(PROJECT_ROOT)}")
+    for index, temperature in enumerate(temperatures, start=1):
+        variant_base = f"{OUTPUT_BASE_NAME}_v{index}"
+        print(f"🚀 Running variation {index}/{len(temperatures)} at temperature {temperature}")
 
-    return output_paths
+        config = build_gemini_edit_config(
+            reference_images=[str(path) for path in reference_paths],
+            target_image=str(target_path),
+            output_base_name=variant_base,
+            system_prompt=SYSTEM_PROMPT,
+            prompt=prompt_text,
+            temperature=temperature,
+            top_p=base_top_p,
+        )
+
+        sampling = config["sampling"]
+        print("💾 Planned output filename:")
+        print(f"  - {config['outputFile']}")
+
+        user_content = build_user_content(
+            system_text=config["system"],
+            prompt_text=prompt_text,
+            reference_paths=reference_paths,
+            target_path=target_path,
+        )
+        response = request_image_edit(
+            user_content=user_content,
+            temperature=sampling["temperature"],
+            top_p=sampling["topP"],
+        )
+        output_paths = save_images(response, SAMPLE_IMAGE_DIR, config["outputFile"])
+
+        print("✅ Gemini returned the following edits:")
+        for path in output_paths:
+            print(f"  - {path.relative_to(PROJECT_ROOT)}")
+        saved_paths.extend(output_paths)
+
+    return saved_paths
 
 
 def main() -> None:
