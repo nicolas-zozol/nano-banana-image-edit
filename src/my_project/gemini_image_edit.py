@@ -13,11 +13,8 @@ input imagery.
 
 from __future__ import annotations
 
-import mimetypes
-import os
-from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List
+from typing import List
 
 from dotenv import load_dotenv
 from google import genai
@@ -25,6 +22,7 @@ from google.genai import types as genai_types
 
 from my_project.edit_configuration import prepare_edit_configuration
 from my_project.gemini_config import build_gemini_edit_config
+from my_project.shared import build_user_content, generate_temperature_schedule, request_image_edit, save_images
 
 # ---------------------------------------------------------------------------
 # Configuration section – tweak these values before each run.
@@ -70,147 +68,6 @@ PROCESSED_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "processed"  # reserved for 
 SAMPLE_IMAGE_DIR: Path = PROJECT_ROOT / "data" / "samples"
 
 
-def load_api_key() -> str:
-    """Fetch the Gemini API key from the environment (via .env)."""
-
-    load_dotenv()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY was not found. Set it in your .env file before running."
-        )
-    return api_key
-
-
-def build_user_content(
-    *,
-    system_text: str,
-    prompt_text: str,
-    reference_paths: Iterable[Path],
-    target_path: Path,
-) -> genai_types.Content:
-    """Assemble a single ``user`` content block with system and prompt text."""
-
-    stripped_prompt = prompt_text.strip()
-    if not stripped_prompt:
-        raise ValueError("The prompt could not be empty. Check the markdown file content.")
-
-    parts: List[genai_types.Part] = []
-
-    stripped_system = system_text.strip()
-    if stripped_system:
-        parts.append(genai_types.Part(text=f"[SYSTEM]\n{stripped_system}"))
-
-    parts.append(genai_types.Part(text=stripped_prompt))
-
-    ordered_paths = [*reference_paths, target_path]
-    for path in ordered_paths:
-        mime_type, _ = mimetypes.guess_type(path.as_posix())
-        if not mime_type:
-            raise ValueError(
-                f"Could not infer a MIME type for '{path.name}'. Rename it with a known extension."
-            )
-
-        parts.append(
-            genai_types.Part(
-                inline_data=genai_types.Blob(
-                    mime_type=mime_type,
-                    data=path.read_bytes(),
-                )
-            )
-        )
-
-    return genai_types.Content(role="user", parts=parts)
-
-
-def generate_temperature_schedule(base: float, count: int, spread: float = TEMPERATURE_SPREAD) -> List[float]:
-    """Return a list of temperatures centred around ``base`` within safe bounds."""
-
-    minimum = 0.20
-    maximum = 0.35
-    if count <= 1:
-        return [round(max(min(base, maximum), minimum), 4)]
-
-    lower = max(minimum, base - spread)
-    upper = min(maximum, base + spread)
-    if upper <= lower:
-        return [round(lower, 4)] * count
-
-    step = (upper - lower) / (count - 1)
-    return [round(lower + step * idx, 4) for idx in range(count)]
-
-
-def request_image_edit(
-    *,
-    user_content: genai_types.Content,
-    temperature: float,
-    top_p: float,
-) -> genai_types.GenerateContentResponse:
-    """Send the edit request to Gemini and return the raw response."""
-
-    api_key = load_api_key()
-    client = genai.Client(api_key=api_key)
-
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=[user_content],
-        config=genai_types.GenerateContentConfig(
-            response_modalities=["IMAGE"],
-            candidate_count=1,
-            temperature=temperature,
-            top_p=top_p,
-        ),
-    )
-
-    if not response.candidates:
-        raise RuntimeError("Gemini response did not include any candidates. Check the request.")
-
-    return response
-
-
-def save_images(
-    response: genai_types.GenerateContentResponse,
-    output_dir: Path,
-    preferred_filename: str,
-) -> List[Path]:
-    """Persist inline image content to disk and return the created paths."""
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    saved_paths: List[Path] = []
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-
-    base_name, ext = os.path.splitext(preferred_filename)
-    if not base_name:
-        base_name = f"gemini_edit_{timestamp}"
-    if not ext:
-        ext = ".png"
-
-    for candidate_index, candidate in enumerate(response.candidates):
-        if not candidate.content or not candidate.content.parts:
-            continue
-
-        for part_index, part in enumerate(candidate.content.parts):
-            inline = getattr(part, "inline_data", None)
-            if not inline or not getattr(inline, "data", None):
-                continue
-
-            mime_type = getattr(inline, "mime_type", None) or "image/png"
-            guessed_ext = mimetypes.guess_extension(mime_type) or ext
-            if candidate_index == 0 and part_index == 0:
-                filename = f"{base_name}{guessed_ext}"
-            else:
-                filename = f"{base_name}_{timestamp}_{candidate_index:02d}_{part_index:02d}{guessed_ext}"
-
-            target_path = output_dir / filename
-            target_path.write_bytes(inline.data)
-            saved_paths.append(target_path)
-
-    if not saved_paths:
-        raise RuntimeError("Gemini response did not include any inline image data to save.")
-
-    return saved_paths
-
-
 def run_image_edit() -> List[Path]:
     """Top-level helper that executes the end-to-end edit workflow."""
 
@@ -241,7 +98,14 @@ def run_image_edit() -> List[Path]:
     print(f"  - {target_path.relative_to(PROJECT_ROOT)}")
 
     base_top_p = base_config["sampling"]["topP"]
-    temperatures = generate_temperature_schedule(BASE_TEMPERATURE, VARIATIONS)
+    min_temp = max(0.20, BASE_TEMPERATURE - TEMPERATURE_SPREAD)
+    max_temp = min(0.35, BASE_TEMPERATURE + TEMPERATURE_SPREAD)
+    temperatures = generate_temperature_schedule(
+        base=BASE_TEMPERATURE,
+        count=VARIATIONS,
+        minimum=min_temp,
+        maximum=max_temp,
+    )
     print("🎛️ Temperature schedule:")
     for idx, temp in enumerate(temperatures, start=1):
         print(f"  - variation {idx}: temperature={temp}")
@@ -273,6 +137,7 @@ def run_image_edit() -> List[Path]:
             target_path=target_path,
         )
         response = request_image_edit(
+            model_name=MODEL_NAME,
             user_content=user_content,
             temperature=sampling["temperature"],
             top_p=sampling["topP"],
