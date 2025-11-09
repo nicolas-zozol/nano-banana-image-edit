@@ -31,19 +31,20 @@ from my_project.gemini_config import build_gemini_edit_config
 
 # Human-friendly instructions describing the edit you want Gemini to perform.
 # Provide the filename of a markdown prompt located under ``data/prompts``.
-PROMPT_FILE_NAME: str = "swap-dress.md"
+PROMPT_FILE_NAME: str = "two-references.md"
 
 # Reference imagery (dress details etc.), relative to REFERENCE_IMAGE_DIR.
 REFERENCE_IMAGE_NAMES: List[str] = [
-    "robe-orange.jpeg"
+    "bord-de-plage.png",
+    "bord-de-plage-zoom-4.jpeg"
 ]
 
 # Target image (the photo to edit), relative to TARGET_IMAGE_DIR.
 #  "asian-girl-supermarket.jpg"
-TARGET_IMAGE_NAME: str ="blonde-woman-posing.jpeg"
+TARGET_IMAGE_NAME: str ="asian-girl-supermarket.jpg"
 
 # Output filename base (timestamp appended automatically).
-OUTPUT_BASE_NAME: str = "blonde"
+OUTPUT_BASE_NAME: str = "asian"
 
 # System instruction passed to Gemini.
 SYSTEM_PROMPT: str = (
