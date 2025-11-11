@@ -12,6 +12,7 @@ from my_project.shared import (
     load_prompt,
     request_image_edit,
     save_images,
+    extract_text_responses,
 )
 
 # ---------------------------------------------------------------------------
@@ -23,7 +24,7 @@ SYSTEM_PROMPT_FILE_NAME: str = "extract-garment-system.md"
 
 # Reference imagery (dress details etc.), relative to REFERENCE_IMAGE_DIR.
 REFERENCE_IMAGE_NAMES: List[str] = [
-    "model-louvres"
+    "robe-orange.jpeg"
 ]
 
 # Output filename base (timestamp appended automatically).
@@ -130,7 +131,19 @@ def run_extraction() -> List[Path]:
             temperature=sampling["temperature"],
             top_p=sampling["topP"],
         )
-        output_paths = save_images(response, EXTRACTED_SAMPLE_DIR, config["outputFile"])
+
+        try:
+            output_paths = save_images(response, EXTRACTED_SAMPLE_DIR, config["outputFile"])
+        except RuntimeError as exc:
+            print(f"⚠️ Extraction variation {index} did not produce an image: {exc}")
+            explanations = extract_text_responses(response)
+            if explanations:
+                print("📝 Gemini explanation:")
+                for explanation in explanations:
+                    print(f"  • {explanation}")
+            else:
+                print("  • No textual explanation was returned.")
+            continue
 
         print("✅ Gemini returned the following extractions:")
         for path in output_paths:

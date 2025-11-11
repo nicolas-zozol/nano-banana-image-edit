@@ -232,3 +232,18 @@ def generate_temperature_schedule(base: float, count: int, minimum: float = 0.20
 
     step = (upper - lower) / (count - 1)
     return [round(lower + step * idx, 4) for idx in range(count)]
+
+
+def extract_text_responses(response: genai_types.GenerateContentResponse) -> List[str]:
+    """Collect any textual explanations returned by Gemini."""
+
+    texts: List[str] = []
+    for candidate in response.candidates or []:
+        content = getattr(candidate, "content", None)
+        if not content or not getattr(content, "parts", None):
+            continue
+        for part in content.parts:
+            text = getattr(part, "text", None)
+            if text:
+                texts.append(text)
+    return texts
